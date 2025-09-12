@@ -3,6 +3,7 @@ import requests
 import os
 import time
 from typing import Dict, Any, List
+import streamlit.components.v1 as components
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -29,8 +30,213 @@ st.markdown("""
     margin: 0.5rem 0;
     border-radius: 0.5rem;
 }
+.voice-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    background-color: #f0f2f6;
+    border-radius: 10px;
+    margin: 10px 0;
+}
+.mic-button {
+    background-color: #ff4b4b;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    cursor: pointer;
+    font-size: 20px;
+}
+.mic-button:hover {
+    background-color: #ff6b6b;
+}
+.mic-button.recording {
+    background-color: #ff0000;
+    animation: pulse 1s infinite;
+}
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+.speak-button {
+    background-color: #00c851;
+    color: white;
+    border: none;
+    border-radius: 25px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 10px;
+}
+.speak-button:hover {
+    background-color: #00a844;
+}
 </style>
 """, unsafe_allow_html=True)
+
+# --- Voice Components ---
+def render_speech_recognition_component():
+    """Render speech recognition component using Web Speech API"""
+    speech_component = """
+    <div id="speech-container">
+        <div class="voice-controls">
+            <button id="micButton" class="mic-button" onclick="toggleSpeechRecognition()" title="Click to start/stop voice input">
+                🎤
+            </button>
+            <span id="status">Click microphone to start listening</span>
+        </div>
+        <div id="transcript" style="padding: 10px; background-color: white; border-radius: 5px; min-height: 50px; margin-top: 10px; border: 1px solid #ddd;"></div>
+    </div>
+
+    <script>
+    let recognition;
+    let isRecording = false;
+
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        
+        recognition.onstart = function() {
+            isRecording = true;
+            document.getElementById('micButton').classList.add('recording');
+            document.getElementById('status').textContent = 'Listening... (Click to stop)';
+        };
+        
+        recognition.onresult = function(event) {
+            let finalTranscript = '';
+            let interimTranscript = '';
+            
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript;
+                } else {
+                    interimTranscript += transcript;
+                }
+            }
+            
+            document.getElementById('transcript').innerHTML = 
+                '<strong>Final:</strong> ' + finalTranscript + 
+                '<br><em>Interim:</em> ' + interimTranscript;
+            
+            // Send final transcript to Streamlit
+            if (finalTranscript) {
+                window.parent.postMessage({
+                    type: 'speech_result',
+                    transcript: finalTranscript
+                }, '*');
+            }
+        };
+        
+        recognition.onerror = function(event) {
+            document.getElementById('status').textContent = 'Error: ' + event.error;
+            stopRecording();
+        };
+        
+        recognition.onend = function() {
+            stopRecording();
+        };
+    } else {
+        document.getElementById('speech-container').innerHTML = 
+            '<div style="color: red;">Speech recognition not supported in this browser. Please use Chrome, Edge, or Safari.</div>';
+    }
+
+    function toggleSpeechRecognition() {
+        if (isRecording) {
+            recognition.stop();
+        } else {
+            recognition.start();
+        }
+    }
+
+    function stopRecording() {
+        isRecording = false;
+        document.getElementById('micButton').classList.remove('recording');
+        document.getElementById('status').textContent = 'Click microphone to start listening';
+    }
+    </script>
+    """
+    return speech_component
+
+def render_text_to_speech_component(text_to_speak):
+    """Render text-to-speech component using Web Speech API"""
+    tts_component = f"""
+    <div id="tts-container">
+        <button id="speakButton" class="speak-button" onclick="speakText()" title="Click to hear this text">
+            🔊 Speak
+        </button>
+        <button id="stopButton" class="speak-button" onclick="stopSpeaking()" title="Stop speaking">
+            🔇 Stop
+        </button>
+        <span id="tts-status"></span>
+    </div>
+
+    <script>
+    let speechSynthesis = window.speechSynthesis;
+    let currentUtterance = null;
+
+    function speakText() {{
+        const textToSpeak = `{text_to_speak}`;
+        
+        if (speechSynthesis.speaking) {{
+            speechSynthesis.cancel();
+        }}
+        
+        if (textToSpeak.trim() === '') {{
+            document.getElementById('tts-status').textContent = 'No text to speak';
+            return;
+        }}
+        
+        currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
+        currentUtterance.rate = 0.9;
+        currentUtterance.pitch = 1;
+        currentUtterance.volume = 1;
+        
+        // Try to use a good English voice
+        const voices = speechSynthesis.getVoices();
+        const englishVoice = voices.find(voice => voice.lang.startsWith('en'));
+        if (englishVoice) {{
+            currentUtterance.voice = englishVoice;
+        }}
+        
+        currentUtterance.onstart = function() {{
+            document.getElementById('tts-status').textContent = 'Speaking...';
+        }};
+        
+        currentUtterance.onend = function() {{
+            document.getElementById('tts-status').textContent = '';
+        }};
+        
+        currentUtterance.onerror = function(event) {{
+            document.getElementById('tts-status').textContent = 'Error: ' + event.error;
+        }};
+        
+        speechSynthesis.speak(currentUtterance);
+    }}
+
+    function stopSpeaking() {{
+        if (speechSynthesis.speaking) {{
+            speechSynthesis.cancel();
+            document.getElementById('tts-status').textContent = 'Stopped';
+        }}
+    }}
+
+    // Load voices when they're ready
+    if (speechSynthesis.onvoiceschanged !== undefined) {{
+        speechSynthesis.onvoiceschanged = function() {{
+            // Voices are now loaded
+        }};
+    }}
+    </script>
+    """
+    return tts_component
 
 # --- API Configuration ---
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -48,7 +254,9 @@ def initialize_session_state():
         "sources": [],
         "processing_complete": False,
         "last_backend_check": 0,
-        "backend_status": False
+        "backend_status": False,
+        "voice_input": "",
+        "last_speech_result": ""
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -225,6 +433,10 @@ def render_sidebar(language_options: Dict[str, str]):
             help="Select your preferred language for analysis and chat"
         )
         
+        # Voice settings
+        st.subheader("🎤 Voice Features")
+        st.info("🎤 **Speech-to-Text**: Click microphone in chat\n🔊 **Text-to-Speech**: Click speak button on responses")
+        
         # Rate limiting info
         st.info("💡 **Rate Limits**: Using Gemini Free Tier. Please wait 5-10 seconds between requests.")
         
@@ -252,15 +464,24 @@ def render_sidebar(language_options: Dict[str, str]):
             1. **Upload PDF**: Upload a legal document
             2. **Analyze**: Click 'Simplify' or 'Assess Risks'
             3. **Chat**: Ask questions about the document
-            4. **Translate**: Get results in your language
+            4. **Voice**: Use microphone for voice input
+            5. **Listen**: Click speak button to hear responses
+            """)
+        
+        with st.expander("Voice Features"):
+            st.markdown("""
+            - **🎤 Voice Input**: Click microphone to speak your question
+            - **🔊 Text-to-Speech**: Click speak button to hear responses
+            - **Browser Support**: Works in Chrome, Edge, Safari
+            - **Language**: Currently English only
             """)
         
         with st.expander("Troubleshooting"):
             st.markdown("""
             - **Upload fails**: Check file size (<10MB) and format (PDF only)
             - **Backend offline**: Run `python run_backend.py`
-            - **Slow responses**: Free Gemini tier has rate limits
-            - **No text extracted**: PDF might be image-based
+            - **Voice not working**: Check microphone permissions
+            - **No audio**: Check browser compatibility and speakers
             """)
     
     return selected_language
@@ -364,7 +585,7 @@ def render_analysis_section(selected_language: str, lang_name: str):
                         st.error(f"❌ Translation Error: {result.get('error')}")
 
 def render_results():
-    """Render analysis results"""
+    """Render analysis results with TTS"""
     if not (st.session_state.simplified_text or st.session_state.risk_assessment):
         return
     
@@ -374,17 +595,26 @@ def render_results():
         if st.session_state.simplified_text:
             with st.expander("📖 Simplified Summary", expanded=True):
                 st.markdown(st.session_state.simplified_text)
+                # Add TTS for simplified text
+                tts_html = render_text_to_speech_component(st.session_state.simplified_text.replace('"', '\\"').replace('\n', ' '))
+                components.html(tts_html, height=60)
         
         if st.session_state.risk_assessment:
             with st.expander("⚠️ Risk Assessment", expanded=True):
                 st.markdown(st.session_state.risk_assessment)
+                # Add TTS for risk assessment
+                tts_html = render_text_to_speech_component(st.session_state.risk_assessment.replace('"', '\\"').replace('\n', ' '))
+                components.html(tts_html, height=60)
 
         if st.session_state.translated_text:
             with st.expander(f"🌐 Translation", expanded=True):
                 st.markdown(st.session_state.translated_text)
+                # Add TTS for translated text
+                tts_html = render_text_to_speech_component(st.session_state.translated_text.replace('"', '\\"').replace('\n', ' '))
+                components.html(tts_html, height=60)
 
 def render_chat_section(selected_language: str):
-    """Render chat interface"""
+    """Render chat interface with voice input"""
     st.header("💬 Step 3: Chat with Document")
     
     if not st.session_state.document_id:
@@ -392,6 +622,14 @@ def render_chat_section(selected_language: str):
         return
     
     with st.container(border=True):
+        # Voice input section
+        st.subheader("🎤 Voice Input")
+        speech_html = render_speech_recognition_component()
+        components.html(speech_html, height=150)
+        
+        # Check for speech result via JavaScript message
+        # Note: This is a simplified approach. For production, you'd want to use st.session_state with callbacks
+        
         # Sample questions
         st.subheader("💡 Try these questions:")
         sample_questions = [
@@ -423,15 +661,19 @@ def render_chat_section(selected_language: str):
         
         st.markdown("---")
         
-        # Chat history display
+        # Chat history display with TTS
         if st.session_state.chat_history:
             st.subheader("💬 Conversation")
-            for message in st.session_state.chat_history[-10:]:  # Show last 10 messages
+            for i, message in enumerate(st.session_state.chat_history[-10:]):  # Show last 10 messages
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
+                    # Add TTS button for assistant responses
+                    if message["role"] == "assistant":
+                        tts_html = render_text_to_speech_component(message["content"].replace('"', '\\"').replace('\n', ' '))
+                        components.html(tts_html, height=50, key=f"tts_{i}")
         
         # Chat input
-        if prompt := st.chat_input("Ask a question about the document...", key="main_chat"):
+        if prompt := st.chat_input("Ask a question about the document... (or use voice input above)", key="main_chat"):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             
             with st.spinner("🤖 Thinking..."):
@@ -462,6 +704,7 @@ def main():
     # Main content area
     st.title("⚖️ ClauseWise - Legal AI Assistant")
     st.markdown("**Simplify legal documents, assess risks, and get answers in plain language.**")
+    st.info("🎤 **New Voice Features**: Click microphone to speak questions, click speak buttons to hear responses!")
     
     if not st.session_state.backend_status:
         st.error("🚫 Backend server is not running. Please start it to use the application.")

@@ -302,7 +302,7 @@ USER QUESTION: {question}
 
 {lang_instruction}
 
-Provide a helpful, accurate answer based on the context. If you cannot find relevant information, say so clearly."""
+Provide a helpful, accurate answer based on the context. If you cannot find relevant information, say so clearly. Try answering in the selected language"""
             
             response = await asyncio.to_thread(self.gemini_llm.invoke, prompt)
             

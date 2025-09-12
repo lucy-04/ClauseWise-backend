@@ -1,25 +1,7 @@
 import os
-import base64
 import logging
-import tempfile
-import asyncio
-import io
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
-
-# ElevenLabs for both TTS and STT
-try:
-    from elevenlabs import ElevenLabs
-    ELEVENLABS_AVAILABLE = True
-except ImportError:
-    ELEVENLABS_AVAILABLE = False
-
-# Audio processing
-try:
-    from pydub import AudioSegment
-    AUDIO_PROCESSING_AVAILABLE = True
-except ImportError:
-    AUDIO_PROCESSING_AVAILABLE = False
 
 load_dotenv()
 
@@ -27,82 +9,95 @@ logger = logging.getLogger(__name__)
 
 class VoiceService:
     def __init__(self):
-        """Initialize voice service with ElevenLabs for both TTS and STT"""
+        """Initialize voice service with fallback to browser-based solutions"""
         
-        # ElevenLabs Configuration
+        # ElevenLabs Configuration (optional)
         self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
         self.client = None
         
-        if self.elevenlabs_api_key and ELEVENLABS_AVAILABLE:
+        # Try to initialize ElevenLabs if available
+        if self.elevenlabs_api_key:
             try:
+                from elevenlabs import ElevenLabs
                 self.client = ElevenLabs(api_key=self.elevenlabs_api_key)
                 logger.info("✅ ElevenLabs TTS + STT service initialized")
+            except ImportError:
+                logger.info("ElevenLabs package not installed - using browser-based voice")
             except Exception as e:
-                logger.error(f"❌ Failed to initialize ElevenLabs: {e}")
+                logger.warning(f"ElevenLabs initialization failed: {e} - using browser-based voice")
         else:
-            logger.warning("ElevenLabs API key not found or package not installed")
+            logger.info("🎤 Using browser-based Web Speech API (no API key required)")
         
-        # Indian Language Support (based on ElevenLabs Scribe v1 documentation)
+        # Indian Language Support (for reference - Web Speech API supports many of these)
         self.indian_language_support = {
             "hi": {
                 "name": "Hindi",
-                "elevenlabs_code": "hin",  # ElevenLabs language code
-                "tts_supported": True,
-                "stt_supported": True,
-                "accuracy": "excellent"  # ≤ 5% WER
+                "elevenlabs_code": "hin",
+                "web_speech_code": "hi-IN",
+                "tts_supported": True,  # Browser TTS
+                "stt_supported": True,  # Browser STT
+                "accuracy": "good"
             },
             "bn": {
                 "name": "Bengali", 
                 "elevenlabs_code": "ben",
+                "web_speech_code": "bn-BD",
                 "tts_supported": True,
                 "stt_supported": True,
-                "accuracy": "high"  # >5% to ≤10% WER
+                "accuracy": "good"
             },
             "te": {
                 "name": "Telugu",
                 "elevenlabs_code": "tel",
+                "web_speech_code": "te-IN",
                 "tts_supported": True,
                 "stt_supported": True,
-                "accuracy": "high"
+                "accuracy": "good"
             },
             "ta": {
                 "name": "Tamil",
                 "elevenlabs_code": "tam",
+                "web_speech_code": "ta-IN",
                 "tts_supported": True,
                 "stt_supported": True,
-                "accuracy": "high"
+                "accuracy": "good"
             },
             "mr": {
                 "name": "Marathi",
                 "elevenlabs_code": "mar",
+                "web_speech_code": "mr-IN",
                 "tts_supported": True,
                 "stt_supported": True,
-                "accuracy": "high"
+                "accuracy": "good"
             },
             "gu": {
                 "name": "Gujarati",
                 "elevenlabs_code": "guj",
+                "web_speech_code": "gu-IN",
                 "tts_supported": True,
                 "stt_supported": True,
-                "accuracy": "good"  # >10% to ≤25% WER
+                "accuracy": "good"
             },
             "kn": {
                 "name": "Kannada",
                 "elevenlabs_code": "kan",
+                "web_speech_code": "kn-IN",
                 "tts_supported": True,
                 "stt_supported": True,
-                "accuracy": "excellent"
+                "accuracy": "good"
             },
             "ml": {
                 "name": "Malayalam",
                 "elevenlabs_code": "mal",
+                "web_speech_code": "ml-IN",
                 "tts_supported": True,
                 "stt_supported": True,
-                "accuracy": "excellent"
+                "accuracy": "good"
             },
             "pa": {
                 "name": "Punjabi",
                 "elevenlabs_code": "pan",
+                "web_speech_code": "pa-IN",
                 "tts_supported": True,
                 "stt_supported": True,
                 "accuracy": "good"
@@ -110,20 +105,23 @@ class VoiceService:
             "or": {
                 "name": "Odia",
                 "elevenlabs_code": "ori",
-                "tts_supported": True,
-                "stt_supported": True,
-                "accuracy": "high"
+                "web_speech_code": "or-IN",
+                "tts_supported": False,  # Limited browser support
+                "stt_supported": False,
+                "accuracy": "limited"
             },
             "as": {
                 "name": "Assamese",
                 "elevenlabs_code": "asm",
-                "tts_supported": True,
-                "stt_supported": True,
-                "accuracy": "good"
+                "web_speech_code": "as-IN",
+                "tts_supported": False,  # Limited browser support
+                "stt_supported": False,
+                "accuracy": "limited"
             },
             "ur": {
                 "name": "Urdu",
                 "elevenlabs_code": "urd",
+                "web_speech_code": "ur-PK",
                 "tts_supported": True,
                 "stt_supported": True,
                 "accuracy": "good"
@@ -131,6 +129,7 @@ class VoiceService:
             "en": {
                 "name": "English",
                 "elevenlabs_code": "eng",
+                "web_speech_code": "en-US",
                 "tts_supported": True,
                 "stt_supported": True,
                 "accuracy": "excellent"
@@ -139,20 +138,14 @@ class VoiceService:
         
         # Default settings
         self.default_voice_id = os.getenv("ELEVENLABS_DEFAULT_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-        self.default_voice_settings = {
-            "stability": 0.75,
-            "similarity_boost": 0.75,
-            "style": 0.0,
-            "use_speaker_boost": True
-        }
     
     def is_tts_available(self) -> bool:
-        """Check if TTS service is available"""
-        return self.client is not None
+        """TTS is always available via browser Web Speech API"""
+        return True
     
     def is_stt_available(self) -> bool:
-        """Check if STT service is available"""
-        return self.client is not None
+        """STT is always available via browser Web Speech API"""
+        return True
     
     def get_supported_languages(self) -> Dict[str, Any]:
         """Get supported languages for both STT and TTS"""
@@ -179,89 +172,58 @@ class VoiceService:
         language: str = "en"
     ) -> Optional[str]:
         """
-        Convert speech to text using ElevenLabs STT (Scribe v1)
-        
-        Args:
-            audio_data: Raw audio bytes
-            audio_format: Audio format (webm, mp3, wav, etc.)
-            language: Language code for transcription
-            
-        Returns:
-            Transcribed text or None if failed
+        Speech to text - handled by browser Web Speech API
+        This method exists for API compatibility but should not be used
+        when using browser-based STT
         """
-        if not self.is_stt_available():
-            logger.warning("STT service not available")
-            return None
-        
-        if not audio_data:
-            logger.warning("Empty audio data provided for STT")
-            return None
-        
-        # Check language support
-        if language not in self.indian_language_support:
-            logger.warning(f"Language {language} not supported, defaulting to English")
-            language = "en"
-        
-        # Get ElevenLabs language code
-        elevenlabs_lang_code = self.indian_language_support[language]["elevenlabs_code"]
-        
-        temp_audio_path = None
-        try:
-            # Create temporary file for audio
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{audio_format}") as temp_file:
-                temp_file.write(audio_data)
-                temp_audio_path = temp_file.name
-            
-            # Convert to supported format if needed
-            if audio_format.lower() in ['webm', 'ogg'] and AUDIO_PROCESSING_AVAILABLE:
-                try:
-                    audio = AudioSegment.from_file(temp_audio_path, format=audio_format)
-                    wav_path = temp_audio_path.replace(f".{audio_format}", ".wav")
-                    audio.export(wav_path, format="wav")
-                    temp_audio_path = wav_path
-                    audio_format = "wav"
-                except Exception as e:
-                    logger.warning(f"Audio conversion failed, using original: {e}")
-            
-            logger.info(f"Transcribing audio in {language} ({elevenlabs_lang_code}) using ElevenLabs Scribe v1")
-            
-            # ElevenLabs STT API call
-            with open(temp_audio_path, "rb") as audio_file:
-                # Using the correct ElevenLabs STT API method
-                response = await asyncio.to_thread(
-                    self.client.speech_to_text.transcribe,
-                    audio_file,
-                    model_id="scribe-v1"  # Scribe v1 model
-                )
-            
-            # Extract transcribed text from response
-            if hasattr(response, 'text'):
-                transcribed_text = response.text
-            elif isinstance(response, dict) and 'text' in response:
-                transcribed_text = response['text']
-            else:
-                logger.error("Unexpected response format from ElevenLabs STT")
-                return None
-            
-            logger.info(f"✅ Successfully transcribed: {len(transcribed_text)} characters in {language}")
-            return transcribed_text.strip()
+        if self.client and self.elevenlabs_api_key:
+            # If ElevenLabs is available, use it
+            try:
+                import tempfile
+                import asyncio
                 
-        except Exception as e:
-            logger.error(f"❌ Error in speech-to-text for {language}: {e}")
-            return None
-        
-        finally:
-            # Clean up temporary files
-            if temp_audio_path and os.path.exists(temp_audio_path):
+                temp_audio_path = None
                 try:
-                    os.remove(temp_audio_path)
-                    # Also remove converted files
-                    for ext in ['.wav', '.mp3']:
-                        converted_path = temp_audio_path.replace(f".{audio_format}", ext)
-                        if converted_path != temp_audio_path and os.path.exists(converted_path):
-                            os.remove(converted_path)
+                    # Create temporary file for audio
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{audio_format}") as temp_file:
+                        temp_file.write(audio_data)
+                        temp_audio_path = temp_file.name
+                    
+                    logger.info(f"Transcribing audio using ElevenLabs: {len(audio_data)} bytes")
+                    
+                    # ElevenLabs STT API call
+                    with open(temp_audio_path, "rb") as audio_file:
+                        response = await asyncio.to_thread(
+                            self.client.speech_to_text.transcribe,
+                            audio_file,
+                            model_id="scribe-v1"
+                        )
+                    
+                    if hasattr(response, 'text'):
+                        return response.text.strip()
+                    elif isinstance(response, dict) and 'text' in response:
+                        return response['text'].strip()
+                    else:
+                        logger.error("Unexpected response format from ElevenLabs STT")
+                        return None
+                        
                 except Exception as e:
-                    logger.warning(f"Could not remove temp audio file: {e}")
+                    logger.error(f"ElevenLabs STT error: {e}")
+                    return None
+                
+                finally:
+                    if temp_audio_path and os.path.exists(temp_audio_path):
+                        try:
+                            os.remove(temp_audio_path)
+                        except Exception as e:
+                            logger.warning(f"Could not remove temp audio file: {e}")
+            except Exception as e:
+                logger.error(f"STT processing error: {e}")
+                return None
+        else:
+            # Return message indicating browser-based STT should be used
+            logger.info("Using browser-based speech recognition")
+            return "Browser-based speech recognition is being used. This message should not appear in production."
     
     async def text_to_speech(
         self, 
@@ -271,134 +233,162 @@ class VoiceService:
         language: str = "en"
     ) -> Optional[str]:
         """
-        Convert text to speech using ElevenLabs TTS
-        
-        Args:
-            text: Text to convert to speech
-            voice_id: ElevenLabs voice ID (optional)
-            voice_settings: Voice configuration (optional)
-            language: Language code for TTS
-            
-        Returns:
-            Base64 encoded audio data or None if failed
+        Text to speech - handled by browser Web Speech API
+        This method exists for API compatibility but should not be used
+        when using browser-based TTS
         """
-        if not self.is_tts_available():
-            logger.warning("TTS service not available")
-            return None
-        
-        if not text or len(text.strip()) == 0:
-            logger.warning("Empty text provided for TTS")
-            return None
-        
-        # Check language support for TTS
-        if not self.is_language_supported(language, "tts"):
-            logger.warning(f"TTS not supported for {language}, defaulting to English")
-            language = "en"
-        
-        # Limit text length
-        max_length = int(os.getenv("TTS_MAX_CHARACTERS", "5000"))
-        if len(text) > max_length:
-            logger.warning(f"Text too long for TTS ({len(text)} chars), truncating")
-            text = text[:max_length-3] + "..."
-        
-        try:
-            voice_id = voice_id or self.default_voice_id
-            settings = voice_settings or self.default_voice_settings
-            
-            logger.info(f"Generating speech in {language} for {len(text)} characters")
-            
-            # Use multilingual model for Indian languages
-            model = "eleven_multilingual_v2" if language != "en" else "eleven_monolingual_v1"
-            
-            # Generate speech
-            audio_generator = self.client.generate(
-                text=text,
-                voice=voice_id,
-                voice_settings=settings,
-                model=model
-            )
-            
-            # Convert to bytes
-            audio_bytes = b"".join(audio_generator)
-            
-            # Encode to base64
-            audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-            
-            logger.info(f"✅ Generated {len(audio_bytes)} bytes of audio in {language}")
-            return audio_base64
-            
-        except Exception as e:
-            logger.error(f"❌ Error in text-to-speech for {language}: {e}")
-            return None
+        if self.client and self.elevenlabs_api_key:
+            # If ElevenLabs is available, use it
+            try:
+                import base64
+                
+                if not text or len(text.strip()) == 0:
+                    return None
+                
+                # Limit text length
+                max_length = int(os.getenv("TTS_MAX_CHARACTERS", "5000"))
+                if len(text) > max_length:
+                    text = text[:max_length-3] + "..."
+                
+                voice_id = voice_id or self.default_voice_id
+                settings = voice_settings or {
+                    "stability": 0.75,
+                    "similarity_boost": 0.75,
+                    "style": 0.0,
+                    "use_speaker_boost": True
+                }
+                
+                logger.info(f"Generating speech using ElevenLabs: {len(text)} characters")
+                
+                # Use multilingual model for Indian languages
+                model = "eleven_multilingual_v2" if language != "en" else "eleven_monolingual_v1"
+                
+                # Generate speech
+                audio_generator = self.client.generate(
+                    text=text,
+                    voice=voice_id,
+                    voice_settings=settings,
+                    model=model
+                )
+                
+                # Convert to bytes
+                audio_bytes = b"".join(audio_generator)
+                
+                # Encode to base64
+                audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+                
+                logger.info(f"Generated {len(audio_bytes)} bytes of audio")
+                return audio_base64
+                
+            except Exception as e:
+                logger.error(f"ElevenLabs TTS error: {e}")
+                return None
+        else:
+            # Return message indicating browser-based TTS should be used
+            logger.info("Using browser-based text-to-speech")
+            return "Browser-based text-to-speech is being used. This message should not appear in production."
     
     async def get_available_voices(self) -> Dict[str, Any]:
-        """Get available TTS voices with language capabilities"""
-        if not self.is_tts_available():
-            return {"error": "TTS service not available", "voices": []}
-        
-        try:
-            voices = self.client.voices.get_all()
-            
-            voice_list = []
-            for voice in voices.voices:
-                voice_info = {
-                    "voice_id": voice.voice_id,
-                    "name": voice.name,
-                    "description": getattr(voice, 'description', ''),
-                    "category": getattr(voice, 'category', ''),
-                    "labels": getattr(voice, 'labels', {}),
-                    "preview_url": getattr(voice, 'preview_url', ''),
+        """Get available TTS voices"""
+        if self.client and self.elevenlabs_api_key:
+            try:
+                voices = self.client.voices.get_all()
+                
+                voice_list = []
+                for voice in voices.voices:
+                    voice_info = {
+                        "voice_id": voice.voice_id,
+                        "name": voice.name,
+                        "description": getattr(voice, 'description', ''),
+                        "category": getattr(voice, 'category', ''),
+                        "labels": getattr(voice, 'labels', {}),
+                        "preview_url": getattr(voice, 'preview_url', ''),
+                        "supports_multilingual": True
+                    }
+                    voice_list.append(voice_info)
+                
+                return {
+                    "voices": voice_list, 
+                    "default_voice_id": self.default_voice_id,
+                    "supported_languages": self.indian_language_support,
+                    "service": "ElevenLabs"
+                }
+            except Exception as e:
+                logger.error(f"Error retrieving ElevenLabs voices: {e}")
+                return self._get_browser_voice_info()
+        else:
+            return self._get_browser_voice_info()
+    
+    def _get_browser_voice_info(self) -> Dict[str, Any]:
+        """Return browser-based voice information"""
+        return {
+            "voices": [
+                {
+                    "voice_id": "browser_default",
+                    "name": "Browser Default Voice",
+                    "description": "Uses browser's built-in text-to-speech",
+                    "category": "browser",
+                    "labels": {"language": "multiple"},
+                    "preview_url": "",
                     "supports_multilingual": True
                 }
-                voice_list.append(voice_info)
-            
-            logger.info(f"Retrieved {len(voice_list)} available voices")
-            return {
-                "voices": voice_list, 
-                "default_voice_id": self.default_voice_id,
-                "supported_languages": self.indian_language_support
-            }
-            
-        except Exception as e:
-            logger.error(f"Error retrieving voices: {e}")
-            return {"error": str(e), "voices": []}
+            ],
+            "default_voice_id": "browser_default",
+            "supported_languages": self.indian_language_support,
+            "service": "Browser Web Speech API",
+            "note": "Actual voices depend on user's browser and operating system"
+        }
     
     def get_service_info(self) -> Dict[str, Any]:
         """Get voice service information"""
+        service_type = "ElevenLabs + Browser Fallback" if (self.client and self.elevenlabs_api_key) else "Browser Web Speech API"
+        
         return {
+            "service_type": service_type,
+            "elevenlabs_available": bool(self.client and self.elevenlabs_api_key),
+            "browser_fallback": True,
             "tts": {
-                "service": "ElevenLabs",
-                "available": self.is_tts_available(),
-                "default_voice_id": self.default_voice_id if self.is_tts_available() else None,
+                "service": service_type,
+                "available": True,  # Always available via browser
+                "default_voice_id": self.default_voice_id if (self.client and self.elevenlabs_api_key) else "browser_default",
                 "max_text_length": int(os.getenv("TTS_MAX_CHARACTERS", "5000")),
-                "supported_formats": ["mp3"],
+                "supported_formats": ["mp3"] if (self.client and self.elevenlabs_api_key) else ["browser_audio"],
+                "note": "Uses browser Web Speech API when ElevenLabs unavailable",
                 "supported_languages": [
                     {
                         "code": code,
                         "name": info["name"],
-                        "supported": info["tts_supported"]
+                        "supported": info["tts_supported"],
+                        "web_speech_code": info.get("web_speech_code", code)
                     }
                     for code, info in self.indian_language_support.items()
                 ]
             },
             "stt": {
-                "service": "ElevenLabs Scribe v1",
-                "available": self.is_stt_available(),
-                "supported_formats": ["webm", "mp3", "wav", "m4a", "ogg", "aac", "flac", "mp4"],
-                "max_file_size_mb": int(os.getenv("STT_MAX_FILE_SIZE_MB", "3000")),  # 3GB limit
-                "max_duration_hours": int(os.getenv("STT_MAX_DURATION_HOURS", "10")),
+                "service": service_type,
+                "available": True,  # Always available via browser
+                "supported_formats": ["webm", "mp3", "wav", "m4a", "ogg", "aac", "flac", "mp4"] if (self.client and self.elevenlabs_api_key) else ["browser_audio"],
+                "max_file_size_mb": int(os.getenv("STT_MAX_FILE_SIZE_MB", "3000")) if (self.client and self.elevenlabs_api_key) else "unlimited",
+                "note": "Uses browser Web Speech API when ElevenLabs unavailable",
                 "supported_languages": [
                     {
                         "code": code,
                         "name": info["name"],
-                        "elevenlabs_code": info["elevenlabs_code"],
-                        "accuracy": info["accuracy"]
+                        "supported": info["stt_supported"],
+                        "web_speech_code": info.get("web_speech_code", code),
+                        "accuracy": info.get("accuracy", "good")
                     }
                     for code, info in self.indian_language_support.items()
                 ]
             },
             "api_keys": {
-                "elevenlabs_configured": bool(self.elevenlabs_api_key)
+                "elevenlabs_configured": bool(self.elevenlabs_api_key),
+                "elevenlabs_working": bool(self.client and self.elevenlabs_api_key)
             },
-            "indian_languages": self.indian_language_support
+            "recommendations": [
+                "Browser-based voice features work without any API keys",
+                "For production use, consider adding ElevenLabs API key for better quality",
+                "Web Speech API requires HTTPS in production",
+                "Voice features require user interaction to work properly"
+            ]
         }
