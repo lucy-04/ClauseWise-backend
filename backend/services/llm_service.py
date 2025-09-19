@@ -4,6 +4,7 @@ import pandas as pd
 import time
 import asyncio
 import glob
+import re
 from typing import List, Tuple, Dict, Any, Optional
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -71,6 +72,35 @@ class EnhancedLLMService:
             self._initialize_legal_knowledge_base()
         
         print("✅ Enhanced LLM Service initialized successfully")
+    
+    def _clean_markdown_output(self, text: str) -> str:
+        """Clean and format markdown output for better display"""
+        # Remove excessive asterisks
+        text = re.sub(r'\*{3,}', '**', text)
+        
+        # Convert markdown bold to simple text with emphasis
+        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+        
+        # Clean up bullet points - ensure proper spacing
+        text = re.sub(r'^(\s*)-\s+', r'• ', text, flags=re.MULTILINE)
+        text = re.sub(r'^(\s*)\*\s+', r'• ', text, flags=re.MULTILINE)
+        text = re.sub(r'^(\s*)(\d+)\.\s+', r'\1\2. ', text, flags=re.MULTILINE)
+        
+        # Clean up headers - remove markdown headers but keep the emphasis
+        text = re.sub(r'^#{1,6}\s+(.+)$', r'\n\1\n', text, flags=re.MULTILINE)
+        
+        # Clean up emojis if present (keep them as they add visual appeal)
+        # But ensure they're properly spaced
+        text = re.sub(r'([🔴🟡🟢⚠️💡✅❌📄📝🔍⚡️⏰📊])\s*', r'\1 ', text)
+        
+        # Ensure proper paragraph spacing
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # Clean up any remaining markdown artifacts
+        text = re.sub(r'`([^`]+)`', r'\1', text)  # Remove inline code formatting
+        text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)  # Remove blockquotes
+        
+        return text.strip()
     
     async def _rate_limit_check(self):
         """Ensure we don't exceed API rate limits"""
@@ -144,7 +174,7 @@ class EnhancedLLMService:
             self.legal_kb_collection = None
     
     async def simplify_document(self, documents: List[Document]) -> str:
-        """Simplify legal document using Gemini"""
+        """Simplify legal document using Gemini with clean output"""
         try:
             await self._rate_limit_check()
             
@@ -159,24 +189,38 @@ class EnhancedLLMService:
 DOCUMENT TO SIMPLIFY:
 {combined_text}
 
-Please provide a clear, simple explanation that includes:
-1. **MAIN PURPOSE**: What is this document for? (in 2-3 sentences)
-2. **KEY POINTS**: What are the most important things to know? (3-5 bullet points)
-3. **YOUR RIGHTS**: What rights do you have under this document?
-4. **YOUR OBLIGATIONS**: What must you do or pay?
-5. **IMPORTANT DATES**: Any deadlines or time limits mentioned?
-6. **WHAT TO WATCH OUT FOR**: Any concerning clauses or conditions?
+Please provide a clear, simple explanation in PLAIN TEXT format (no markdown, no special characters):
 
-Use simple English that a person with basic education can understand. Explain legal terms in plain language."""
+MAIN PURPOSE:
+What is this document for? (in 2-3 sentences)
+
+KEY POINTS:
+List the most important things to know (3-5 points)
+
+YOUR RIGHTS:
+What rights do you have under this document?
+
+YOUR OBLIGATIONS:
+What must you do or pay?
+
+IMPORTANT DATES:
+Any deadlines or time limits mentioned?
+
+WHAT TO WATCH OUT FOR:
+Any concerning clauses or conditions?
+
+Use simple English that a person with basic education can understand. Explain legal terms in plain language.
+DO NOT use markdown formatting, asterisks, or special characters. Use simple numbered lists and clear paragraphs."""
             
             result = await asyncio.to_thread(self.gemini_llm.invoke, prompt)
-            return result.content
+            cleaned_output = self._clean_markdown_output(result.content)
+            return cleaned_output
             
         except Exception as e:
             raise Exception(f"Error simplifying document: {str(e)}")
     
     async def assess_risks(self, documents: List[Document]) -> str:
-        """Assess legal risks in the document"""
+        """Assess legal risks in the document with clean output"""
         try:
             await self._rate_limit_check()
             
@@ -191,29 +235,31 @@ Use simple English that a person with basic education can understand. Explain le
 DOCUMENT:
 {combined_text}
 
-Provide a comprehensive risk assessment:
-**🔴 HIGH RISK AREAS:**
-- List any high-risk clauses or terms
-- Financial liabilities or penalties
+Provide a comprehensive risk assessment in PLAIN TEXT format:
 
-**🟡 MEDIUM RISK AREAS:**
-- Potentially problematic terms
-- Unclear obligations
+HIGH RISK AREAS:
+List any high-risk clauses or terms
+Include financial liabilities or penalties
 
-**🟢 OVERALL RISK LEVEL:** [Low/Medium/High]
+MEDIUM RISK AREAS:
+List potentially problematic terms
+Include unclear obligations
 
-**⚠️ IMMEDIATE ACTION REQUIRED:**
-- Any urgent deadlines
-- Critical decisions needed
+OVERALL RISK LEVEL: (Low/Medium/High)
 
-**💡 RECOMMENDATIONS:**
-- Suggestions to reduce risks
-- When to consult a lawyer
+IMMEDIATE ACTION REQUIRED:
+List any urgent deadlines
+List critical decisions needed
 
-Be specific and practical in your assessment."""
+RECOMMENDATIONS:
+Provide suggestions to reduce risks
+Indicate when to consult a lawyer
+
+Be specific and practical in your assessment. Use plain language without markdown formatting."""
             
             result = await asyncio.to_thread(self.gemini_llm.invoke, prompt)
-            return result.content
+            cleaned_output = self._clean_markdown_output(result.content)
+            return cleaned_output
             
         except Exception as e:
             raise Exception(f"Error assessing risks: {str(e)}")
@@ -241,7 +287,8 @@ Be specific and practical in your assessment."""
             target_lang_name = language_names.get(target_language, "Hindi")
             text_to_translate = text[:3000]
             
-            prompt = f"""Translate the following legal document explanation to {target_lang_name}. Maintain the structure and formatting.
+            prompt = f"""Translate the following legal document explanation to {target_lang_name}. 
+Maintain clarity and simplicity. Do not use markdown formatting.
 
 {text_to_translate}
 
@@ -255,7 +302,7 @@ Translation in {target_lang_name}:"""
             return f"Translation unavailable. Original text: {text[:300]}..."
     
     async def chat_with_document(self, document_vector_store, question: str, language: str = "en") -> Tuple[str, List[str]]:
-        """Enhanced chat using document and legal knowledge base"""
+        """Enhanced chat using document and legal knowledge base with clean output"""
         try:
             await self._rate_limit_check()
             
@@ -290,27 +337,30 @@ Translation in {target_lang_name}:"""
                 lang_name = language_names.get(language, "Hindi")
                 lang_instruction = f"Please answer in {lang_name}."
             
-            prompt = f"""You are a helpful legal assistant for legal documents. Answer the user's question based on the provided context.
+            prompt = f"""You are a helpful legal assistant. Answer the user's question based on the provided context.
+Provide your answer in plain text without any markdown formatting or special characters.
 
 DOCUMENT CONTEXT:
 {doc_context}
 
-LEGAL KNOWLEDGE CONTEXT:
+LEGAL KNOWLEDGE:
 {legal_context}
 
 USER QUESTION: {question}
 
 {lang_instruction}
 
-Provide a helpful, accurate answer based on the context. If you cannot find relevant information, say so clearly. Try answering in the selected language"""
+Provide a clear, helpful answer based on the context. Use simple paragraphs and numbered lists if needed.
+Do not use asterisks, markdown, or special formatting characters."""
             
             response = await asyncio.to_thread(self.gemini_llm.invoke, prompt)
+            cleaned_output = self._clean_markdown_output(response.content)
             
             sources = []
             if doc_context: sources.append("Your uploaded document")
             if legal_context: sources.append("Legal knowledge base")
             
-            return response.content, sources
+            return cleaned_output, sources
             
         except Exception as e:
             print(f"Chat error: {e}")

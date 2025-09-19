@@ -6,6 +6,8 @@ from chromadb.config import Settings
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.schema import Document
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
+import json
 
 load_dotenv()
 
@@ -34,13 +36,82 @@ class VectorStoreManager:
         self.collection_name = os.getenv("CHROMA_COLLECTION_NAME", "legal_documents")
         self.document_collections: Dict[str, chromadb.Collection] = {}
         
+        # Auto-cleanup settings
+        self.max_documents = int(os.getenv("MAX_DOCUMENTS_STORED", "10"))  # Maximum documents to keep
+        self.document_ttl_hours = int(os.getenv("DOCUMENT_TTL_HOURS", "24"))  # Document time-to-live
+        self.auto_cleanup_enabled = os.getenv("AUTO_CLEANUP_ENABLED", "true").lower() == "true"
+        
         print(f"✅ ChromaDB initialized at: {self.chroma_db_path}")
+        print(f"📦 Max documents: {self.max_documents}, TTL: {self.document_ttl_hours} hours")
+        
+        # Perform initial cleanup on startup
+        if self.auto_cleanup_enabled:
+            self._cleanup_old_documents()
+    
+    def _cleanup_old_documents(self):
+        """Clean up old documents based on TTL and max document limit"""
+        try:
+            collections = self.chroma_client.list_collections()
+            collection_info = []
+            
+            for collection in collections:
+                if collection.name.startswith("doc_"):
+                    # Get collection metadata
+                    metadata = collection.metadata or {}
+                    created_at = metadata.get("created_at")
+                    
+                    if created_at:
+                        # Parse creation time
+                        created_time = datetime.fromisoformat(created_at)
+                        age_hours = (datetime.now() - created_time).total_seconds() / 3600
+                        
+                        collection_info.append({
+                            "name": collection.name,
+                            "created_at": created_time,
+                            "age_hours": age_hours,
+                            "count": collection.count()
+                        })
+            
+            # Sort by creation time (oldest first)
+            collection_info.sort(key=lambda x: x["created_at"])
+            
+            # Remove documents older than TTL
+            for info in collection_info:
+                if info["age_hours"] > self.document_ttl_hours:
+                    print(f"🗑️ Removing expired document: {info['name']} (age: {info['age_hours']:.1f} hours)")
+                    self.chroma_client.delete_collection(name=info["name"])
+                    collection_info.remove(info)
+            
+            # Remove oldest documents if we exceed max limit
+            while len(collection_info) > self.max_documents:
+                oldest = collection_info.pop(0)
+                print(f"🗑️ Removing oldest document to maintain limit: {oldest['name']}")
+                self.chroma_client.delete_collection(name=oldest["name"])
+            
+            print(f"✅ Cleanup complete. Current documents: {len(collection_info)}/{self.max_documents}")
+            
+        except Exception as e:
+            print(f"⚠️ Error during cleanup: {e}")
+    
+    def _get_collection_count(self) -> int:
+        """Get current number of document collections"""
+        collections = self.chroma_client.list_collections()
+        return sum(1 for c in collections if c.name.startswith("doc_"))
     
     def create_vector_store(self, document_id: str, documents: List[Document]) -> None:
         """Create and store a vector store for the document using ChromaDB"""
         try:
             if not documents:
                 raise ValueError("No documents provided")
+            
+            # Perform cleanup before adding new document
+            if self.auto_cleanup_enabled:
+                current_count = self._get_collection_count()
+                
+                # If we're at the limit, remove the oldest document
+                if current_count >= self.max_documents:
+                    print(f"⚠️ Document limit reached ({current_count}/{self.max_documents}). Cleaning up...")
+                    self._cleanup_old_documents()
             
             # Create a unique collection for this document
             collection_name = f"doc_{document_id}"
@@ -54,11 +125,15 @@ class VectorStoreManager:
             except Exception as e:
                 print(f"Note: Could not delete existing collection {collection_name}: {e}")
             
-            # Create new collection with retry logic
+            # Create new collection with creation timestamp
             try:
                 collection = self.chroma_client.create_collection(
                     name=collection_name,
-                    metadata={"hnsw:space": "cosine"}
+                    metadata={
+                        "hnsw:space": "cosine",
+                        "created_at": datetime.now().isoformat(),
+                        "document_id": document_id
+                    }
                 )
                 print(f"✅ Created new collection: {collection_name}")
             except Exception as e:
@@ -111,6 +186,10 @@ class VectorStoreManager:
             count = collection.count()
             print(f"✅ Created vector store for document {document_id} with {count} chunks")
             
+            # Show current storage status
+            current_count = self._get_collection_count()
+            print(f"📊 Storage status: {current_count}/{self.max_documents} documents")
+            
         except Exception as e:
             print(f"❌ Error creating vector store: {str(e)}")
             raise Exception(f"Error creating vector store: {str(e)}")
@@ -126,6 +205,16 @@ class VectorStoreManager:
             try:
                 collection = self.chroma_client.get_collection(name=collection_name)
                 self.document_collections[document_id] = collection
+                
+                # Update last accessed time
+                if self.auto_cleanup_enabled:
+                    try:
+                        metadata = collection.metadata or {}
+                        metadata["last_accessed"] = datetime.now().isoformat()
+                        collection.modify(metadata=metadata)
+                    except Exception as e:
+                        print(f"Could not update last accessed time: {e}")
+                
                 return collection
             except ValueError:
                 print(f"Collection not found for document {document_id}")
@@ -136,7 +225,7 @@ class VectorStoreManager:
             return None
     
     def get_all_chunks(self, document_id: str) -> List[Document]:
-        """Get all document chunks for a given document ID - FIXED: This method was missing"""
+        """Get all document chunks for a given document ID"""
         collection = self.get_vector_store(document_id)
         if not collection:
             return []
@@ -203,6 +292,11 @@ class VectorStoreManager:
                 del self.document_collections[document_id]
             
             print(f"✅ Deleted vector store for document {document_id}")
+            
+            # Show current storage status
+            current_count = self._get_collection_count()
+            print(f"📊 Storage status: {current_count}/{self.max_documents} documents")
+            
             return True
             
         except Exception as e:
@@ -233,11 +327,29 @@ class VectorStoreManager:
             return {}
         
         try:
+            metadata = collection.metadata or {}
+            created_at = metadata.get("created_at")
+            age_hours = 0
+            
+            if created_at:
+                created_time = datetime.fromisoformat(created_at)
+                age_hours = (datetime.now() - created_time).total_seconds() / 3600
+            
             return {
                 "name": collection.name,
                 "count": collection.count(),
-                "metadata": collection.metadata
+                "metadata": metadata,
+                "age_hours": age_hours,
+                "ttl_remaining_hours": max(0, self.document_ttl_hours - age_hours)
             }
         except Exception as e:
             print(f"Error getting collection info: {e}")
             return {}
+    
+    def cleanup_all(self):
+        """Manually trigger cleanup of all expired documents"""
+        if self.auto_cleanup_enabled:
+            print("🧹 Manual cleanup triggered...")
+            self._cleanup_old_documents()
+        else:
+            print("⚠️ Auto-cleanup is disabled")

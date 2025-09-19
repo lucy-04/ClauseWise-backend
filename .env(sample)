@@ -1,0 +1,35 @@
+# ClauseWise Backend Environment Configuration
+# Place your actual API keys here (no quotes needed)
+
+# Required: Google Gemini API Key for LLM
+GOOGLE_API_KEY=your_actual_gemini_api_key_here
+
+# Required: ElevenLabs API Key for Voice Services (TTS + STT)
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+
+# Voice Service Configuration
+ELEVENLABS_DEFAULT_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+TTS_MAX_CHARACTERS=5000
+STT_MAX_FILE_SIZE_MB=3000
+STT_MAX_DURATION_HOURS=10
+
+# Application Settings
+RATE_LIMIT_REQUESTS_PER_MINUTE=15
+MAX_FILE_SIZE_MB=10
+CHUNK_SIZE=1000
+ENABLE_LEGAL_KB=true
+
+# Database Paths
+CHROMA_DB_PATH=./chroma_db
+LEGAL_DATASETS_PATH=./legal_datasets
+CHROMA_COLLECTION_NAME=legal_documents
+
+# Vector Store Management (NEW SETTINGS)
+# Maximum number of documents to store at once
+MAX_DOCUMENTS_STORED=10
+
+# Document time-to-live in hours (auto-delete after this time)
+DOCUMENT_TTL_HOURS=24
+
+# Enable automatic cleanup of old documents
+AUTO_CLEANUP_ENABLED=true
