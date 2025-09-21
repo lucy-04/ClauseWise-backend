@@ -32,7 +32,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
+# Configure CORS - UPDATED FOR VERCEL FRONTEND
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -40,25 +40,93 @@ app.add_middleware(
         "http://localhost:8501", 
         "http://127.0.0.1:3000", 
         "http://127.0.0.1:8501",
-        "http://localhost:5173",  # Vite dev server
-        "http://127.0.0.1:5173",   # Vite dev server
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://localhost:5174",
-        "https://clausewise-j83i8cskd-lakshay-tutejas-projects.vercel.app",
-        "clausewise-j83i8cskd-lakshay-tutejas-projects.vercel.app"
+        "https://clausewise-green.vercel.app",  # Your production frontend
+        "https://clausewise.vercel.app",  # Alternative domain
+        "*"  # For development - remove in production if security is critical
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
+# Language detection function
+def detect_language_from_text(text: str) -> str:
+    """
+    Detect language from text by checking for script patterns
+    """
+    # Hindi/Devanagari script range (also used for Marathi)
+    if any('\u0900' <= char <= '\u097F' for char in text):
+        return "hi"
+    
+    # Bengali script range
+    if any('\u0980' <= char <= '\u09FF' for char in text):
+        return "bn"
+    
+    # Telugu script range
+    if any('\u0C00' <= char <= '\u0C7F' for char in text):
+        return "te"
+    
+    # Tamil script range
+    if any('\u0B80' <= char <= '\u0BFF' for char in text):
+        return "ta"
+    
+    # Gujarati script range
+    if any('\u0A80' <= char <= '\u0AFF' for char in text):
+        return "gu"
+    
+    # Kannada script range
+    if any('\u0C80' <= char <= '\u0CFF' for char in text):
+        return "kn"
+    
+    # Malayalam script range
+    if any('\u0D00' <= char <= '\u0D7F' for char in text):
+        return "ml"
+    
+    # Punjabi/Gurmukhi script range
+    if any('\u0A00' <= char <= '\u0A7F' for char in text):
+        return "pa"
+    
+    # Odia script range
+    if any('\u0B00' <= char <= '\u0B7F' for char in text):
+        return "or"
+    
+    # Urdu/Arabic script range
+    if any('\u0600' <= char <= '\u06FF' for char in text) or any('\uFB50' <= char <= '\uFDFF' for char in text):
+        return "ur"
+    
+    # Assamese (uses Bengali script with some additions)
+    if any('\u0980' <= char <= '\u09FF' for char in text):
+        # Check for Assamese-specific characters
+        if any(char in '\u09F0\u09F1' for char in text):
+            return "as"
+        return "bn"  # Default to Bengali if no Assamese-specific chars
+    
+    # Default to English
+    return "en"
+
+# UPDATED BACKEND SECRET MIDDLEWARE FOR FREE TIER
 @app.middleware("http")
 async def verify_secret(request: Request, call_next):
-    secret = request.headers.get("x-backend-secret")
+    # Allow health checks and OPTIONS requests
     if request.url.path == "/health" or request.method == "OPTIONS":
         return await call_next(request)
-    if secret != os.getenv("BACKEND_SECRET"):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    # Get backend secret from environment
+    backend_secret = os.getenv("BACKEND_SECRET")
+    
+    # If backend secret is configured, validate it
+    if backend_secret and backend_secret != "optional_for_free_tier":
+        secret = request.headers.get("x-backend-secret")
+        if secret != backend_secret:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Forbidden: Invalid or missing backend secret"}
+            )
+    
     return await call_next(request)
 
 # Initialize services
@@ -87,18 +155,20 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize services: {e}")
     raise
 
-# Pydantic models
+# Pydantic models - UPDATED WITH LANGUAGE SUPPORT
 class SimplificationRequest(BaseModel):
     document_id: str
+    language: str = "en"  # ADDED LANGUAGE SUPPORT
 
 class RiskAssessmentRequest(BaseModel):
     document_id: str
+    language: str = "en"  # ADDED LANGUAGE SUPPORT
 
 class ChatRequest(BaseModel):
     document_id: str
     question: str
     language: str = "en"
-    use_document_language: bool = True
+    use_document_language: bool = False  # Changed default to False for better auto-detection
 
 class TranslationRequest(BaseModel):
     text: str
@@ -181,7 +251,9 @@ async def upload_document(
             collection = vector_store_manager.get_vector_store(doc_id)
             if collection:
                 # Update collection metadata with language info
-                collection.modify(metadata={"language": language})
+                metadata = collection.metadata or {}
+                metadata["language"] = language
+                collection.modify(metadata=metadata)
         except Exception as e:
             logger.warning(f"Could not store language metadata: {e}")
         
@@ -287,24 +359,33 @@ async def get_document_language(document_id: str):
         logger.error(f"Error getting document language: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Simplify document endpoint
+# UPDATED Simplify document endpoint with language auto-detection
 @app.post("/simplify", tags=["Analysis"])
 async def simplify_document_endpoint(request: SimplificationRequest):
-    """Simplify a legal document into plain language"""
+    """Simplify a legal document into plain language with language support"""
     try:
-        logger.info(f"Simplifying document {request.document_id}")
+        # Auto-detect language if not specified
+        if request.language == "en":
+            # Try to get from document metadata
+            collection_info = vector_store_manager.get_collection_info(request.document_id)
+            stored_language = collection_info.get("metadata", {}).get("language", "en")
+            if stored_language != "en":
+                request.language = stored_language
+        
+        logger.info(f"Simplifying document {request.document_id} in {request.language}")
         
         # Get document chunks
         chunks = vector_store_manager.get_all_chunks(request.document_id)
         if not chunks:
             raise HTTPException(status_code=404, detail="Document not found or has no content")
         
-        # Simplify using LLM
-        simplified_text = await llm_service.simplify_document(chunks)
+        # Simplify using LLM with language parameter
+        simplified_text = await llm_service.simplify_document(chunks, request.language)
         
         return {
             "simplified_text": simplified_text,
             "document_id": request.document_id,
+            "language": request.language,
             "chunks_processed": len(chunks)
         }
         
@@ -314,24 +395,33 @@ async def simplify_document_endpoint(request: SimplificationRequest):
         logger.error(f"Error simplifying document {request.document_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Simplification failed: {str(e)}")
 
-# Risk assessment endpoint
+# UPDATED Risk assessment endpoint with language support
 @app.post("/assess-risk", tags=["Analysis"])
 async def assess_risk_endpoint(request: RiskAssessmentRequest):
-    """Assess legal risks in a document"""
+    """Assess legal risks in a document with language support"""
     try:
-        logger.info(f"Assessing risks for document {request.document_id}")
+        # Auto-detect language if not specified
+        if request.language == "en":
+            # Try to get from document metadata
+            collection_info = vector_store_manager.get_collection_info(request.document_id)
+            stored_language = collection_info.get("metadata", {}).get("language", "en")
+            if stored_language != "en":
+                request.language = stored_language
+        
+        logger.info(f"Assessing risks for document {request.document_id} in {request.language}")
         
         # Get document chunks
         chunks = vector_store_manager.get_all_chunks(request.document_id)
         if not chunks:
             raise HTTPException(status_code=404, detail="Document not found or has no content")
         
-        # Assess risks using LLM
-        risk_assessment = await llm_service.assess_risks(chunks)
+        # Assess risks using LLM with language support
+        risk_assessment = await llm_service.assess_risks(chunks, request.language)
         
         return {
             "risk_assessment": risk_assessment,
             "document_id": request.document_id,
+            "language": request.language,
             "chunks_processed": len(chunks)
         }
         
@@ -341,30 +431,43 @@ async def assess_risk_endpoint(request: RiskAssessmentRequest):
         logger.error(f"Error assessing risks for document {request.document_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Risk assessment failed: {str(e)}")
 
-# Chat with document endpoint
+# UPDATED Chat endpoint with auto language detection
 @app.post("/chat", tags=["Interaction"])
 async def chat_with_document_endpoint(request: ChatRequest):
     """Chat with a document using AI with language-aware voice support"""
     try:
         logger.info(f"Chat request for document {request.document_id}: {request.question[:50]}...")
+        logger.info(f"Request language parameter: {request.language}")
         
         # Get vector store
         vector_store = vector_store_manager.get_vector_store(request.document_id)
         if not vector_store:
             raise HTTPException(status_code=404, detail="Document vector store not found.")
 
-        # Get document language if use_document_language is True
-        document_language = request.language
-        if request.use_document_language:
+        # AUTO-DETECT LANGUAGE FROM QUESTION
+        detected_language = detect_language_from_text(request.question)
+        logger.info(f"Detected language from question text: {detected_language}")
+        
+        # Priority: detected language > request language > document language
+        document_language = detected_language
+        
+        # If no language detected from text, use request language
+        if detected_language == "en" and request.language != "en":
+            document_language = request.language
+            logger.info(f"Using request language: {document_language}")
+        
+        # If still English and use_document_language is True, try document metadata
+        if document_language == "en" and request.use_document_language:
             try:
-                # Try to get language from vector store metadata
                 collection_info = vector_store_manager.get_collection_info(request.document_id)
                 stored_language = collection_info.get("metadata", {}).get("language")
-                if stored_language:
+                if stored_language and stored_language != "en":
                     document_language = stored_language
-                    logger.info(f"Using document language: {document_language}")
+                    logger.info(f"Using stored document language: {document_language}")
             except Exception as e:
                 logger.warning(f"Could not retrieve document language: {e}")
+
+        logger.info(f"Final language for response: {document_language}")
 
         # Get answer from LLM
         answer, sources = await llm_service.chat_with_document(
@@ -379,6 +482,7 @@ async def chat_with_document_endpoint(request: ChatRequest):
             "question": request.question,
             "language": document_language,
             "document_id": request.document_id,
+            "detected_language": detected_language,
             "voice_support": {
                 "can_speak_response": voice_service.is_language_supported(document_language, "tts"),
                 "can_transcribe_input": voice_service.is_language_supported(document_language, "stt")
@@ -616,7 +720,7 @@ async def root():
             "PDF document processing",
             "Legal document simplification", 
             "Risk assessment",
-            "Multi-language chat",
+            "Multi-language chat with auto-detection",
             "Voice input/output with ElevenLabs",
             "13+ Indian languages support"
         ],
@@ -626,9 +730,9 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # Get port from environment variable, default to 8000
-    port = int(os.getenv("PORT", 8000))
+
+    # Get port from environment variable, default to 8080
+    port = int(os.getenv("PORT", 8080))
     
     print(f"🚀 Starting ClauseWise API on port {port}")
     

@@ -173,8 +173,8 @@ class EnhancedLLMService:
             print(f"❌ Error initializing legal knowledge base: {e}")
             self.legal_kb_collection = None
     
-    async def simplify_document(self, documents: List[Document]) -> str:
-        """Simplify legal document using Gemini with clean output"""
+    async def simplify_document(self, documents: List[Document], language: str = "en") -> str:
+        """Simplify legal document using Gemini with language support"""
         try:
             await self._rate_limit_check()
             
@@ -183,6 +183,26 @@ class EnhancedLLMService:
                 if len(combined_text) + len(doc.page_content) > 4000: 
                     break
                 combined_text += doc.page_content + "\n\n"
+            
+            # Language-specific instructions
+            lang_instruction = ""
+            if language != "en":
+                language_names = {
+                    "hi": "Hindi (हिंदी)",
+                    "bn": "Bengali (বাংলা)",
+                    "te": "Telugu (తెలుగు)",
+                    "mr": "Marathi (मराठी)",
+                    "ta": "Tamil (தமிழ்)",
+                    "gu": "Gujarati (ગુજરાતી)",
+                    "kn": "Kannada (ಕನ್ನಡ)",
+                    "ml": "Malayalam (മലയാളം)",
+                    "or": "Odia (ଓଡ଼ିଆ)",
+                    "pa": "Punjabi (ਪੰਜਾਬੀ)",
+                    "ur": "Urdu (اردو)",
+                    "as": "Assamese (অসমীয়া)"
+                }
+                lang_name = language_names.get(language, "Hindi")
+                lang_instruction = f"\n\nIMPORTANT: Provide your ENTIRE explanation in {lang_name} language only. Do not use English."
             
             prompt = f"""You are a legal expert helping ordinary people understand legal documents. 
 
@@ -209,8 +229,9 @@ Any deadlines or time limits mentioned?
 WHAT TO WATCH OUT FOR:
 Any concerning clauses or conditions?
 
-Use simple English that a person with basic education can understand. Explain legal terms in plain language.
-DO NOT use markdown formatting, asterisks, or special characters. Use simple numbered lists and clear paragraphs."""
+Use simple language that a person with basic education can understand. Explain legal terms in plain language.
+DO NOT use markdown formatting, asterisks, or special characters. Use simple numbered lists and clear paragraphs.
+{lang_instruction}"""
             
             result = await asyncio.to_thread(self.gemini_llm.invoke, prompt)
             cleaned_output = self._clean_markdown_output(result.content)
@@ -219,8 +240,8 @@ DO NOT use markdown formatting, asterisks, or special characters. Use simple num
         except Exception as e:
             raise Exception(f"Error simplifying document: {str(e)}")
     
-    async def assess_risks(self, documents: List[Document]) -> str:
-        """Assess legal risks in the document with clean output"""
+    async def assess_risks(self, documents: List[Document], language: str = "en") -> str:
+        """Assess legal risks in the document with language support"""
         try:
             await self._rate_limit_check()
             
@@ -229,6 +250,26 @@ DO NOT use markdown formatting, asterisks, or special characters. Use simple num
                 if len(combined_text) + len(doc.page_content) > 3500: 
                     break
                 combined_text += doc.page_content + "\n\n"
+            
+            # Language-specific instructions
+            lang_instruction = ""
+            if language != "en":
+                language_names = {
+                    "hi": "Hindi (हिंदी)",
+                    "bn": "Bengali (বাংলা)",
+                    "te": "Telugu (తెలుగు)",
+                    "mr": "Marathi (मराठी)",
+                    "ta": "Tamil (தமிழ்)",
+                    "gu": "Gujarati (ગુજરાતી)",
+                    "kn": "Kannada (ಕನ್ನಡ)",
+                    "ml": "Malayalam (മലയാളം)",
+                    "or": "Odia (ଓଡ଼ିଆ)",
+                    "pa": "Punjabi (ਪੰਜਾਬੀ)",
+                    "ur": "Urdu (اردو)",
+                    "as": "Assamese (অসমীয়া)"
+                }
+                lang_name = language_names.get(language, "Hindi")
+                lang_instruction = f"\n\nCRITICAL: Provide your ENTIRE risk assessment in {lang_name} language only. Do not use English."
             
             prompt = f"""As a legal risk analyst, evaluate the following document for potential risks:
 
@@ -255,7 +296,8 @@ RECOMMENDATIONS:
 Provide suggestions to reduce risks
 Indicate when to consult a lawyer
 
-Be specific and practical in your assessment. Use plain language without markdown formatting."""
+Be specific and practical in your assessment. Use plain language without markdown formatting.
+{lang_instruction}"""
             
             result = await asyncio.to_thread(self.gemini_llm.invoke, prompt)
             cleaned_output = self._clean_markdown_output(result.content)
@@ -302,10 +344,11 @@ Translation in {target_lang_name}:"""
             return f"Translation unavailable. Original text: {text[:300]}..."
     
     async def chat_with_document(self, document_vector_store, question: str, language: str = "en") -> Tuple[str, List[str]]:
-        """Enhanced chat using document and legal knowledge base with clean output"""
+        """Enhanced chat using document and legal knowledge base with proper language support"""
         try:
             await self._rate_limit_check()
             
+            # Get document context
             doc_context = ""
             if hasattr(document_vector_store, 'query'):
                 try:
@@ -316,6 +359,7 @@ Translation in {target_lang_name}:"""
                 except Exception as e:
                     print(f"Document query error: {e}")
             
+            # Get legal context
             legal_context = ""
             if self.legal_kb_collection:
                 try:
@@ -326,19 +370,34 @@ Translation in {target_lang_name}:"""
                 except Exception as e:
                     print(f"Legal KB query error: {e}")
             
+            # Language instruction - CRITICAL FIX
             lang_instruction = ""
-            if language != "en":
-                language_names = {
-                    "hi": "Hindi", "bn": "Bengali", "te": "Telugu", 
-                    "mr": "Marathi", "ta": "Tamil", "gu": "Gujarati", 
-                    "kn": "Kannada", "ml": "Malayalam", "or": "Odia", 
-                    "pa": "Punjabi", "ur": "Urdu", "as": "Assamese"
-                }
-                lang_name = language_names.get(language, "Hindi")
-                lang_instruction = f"Please answer in {lang_name}."
+            language_names = {
+                "hi": "Hindi (हिंदी)",
+                "bn": "Bengali (বাংলা)",
+                "te": "Telugu (తెలుగు)",
+                "mr": "Marathi (मराठी)",
+                "ta": "Tamil (தமிழ்)",
+                "gu": "Gujarati (ગુજરાતી)",
+                "kn": "Kannada (ಕನ್ನಡ)",
+                "ml": "Malayalam (മലയാളം)",
+                "or": "Odia (ଓଡ଼ିଆ)",
+                "pa": "Punjabi (ਪੰਜਾਬੀ)",
+                "ur": "Urdu (اردو)",
+                "as": "Assamese (অসমীয়া)"
+            }
             
+            if language != "en":
+                lang_name = language_names.get(language, "Hindi")
+                # CRITICAL: More emphatic language instruction
+                lang_instruction = f"""
+IMPORTANT: You MUST respond ENTIRELY in {lang_name} language.
+Your ENTIRE answer should be in {lang_name}, NOT in English.
+कृपया {lang_name} में उत्तर दें। Do not use English in your response.
+"""
+            
+            # Modified prompt with stronger language enforcement
             prompt = f"""You are a helpful legal assistant. Answer the user's question based on the provided context.
-Provide your answer in plain text without any markdown formatting or special characters.
 
 DOCUMENT CONTEXT:
 {doc_context}
@@ -350,8 +409,13 @@ USER QUESTION: {question}
 
 {lang_instruction}
 
-Provide a clear, helpful answer based on the context. Use simple paragraphs and numbered lists if needed.
-Do not use asterisks, markdown, or special formatting characters."""
+CRITICAL INSTRUCTIONS:
+1. Provide a clear, helpful answer based on the context
+2. Use simple paragraphs and numbered lists if needed
+3. Do not use asterisks, markdown, or special formatting
+{f"4. YOUR ENTIRE RESPONSE MUST BE IN {language_names.get(language, language).upper()} LANGUAGE ONLY!" if language != "en" else ""}
+
+{"Reply in " + language_names.get(language, language) + " language:" if language != "en" else "Answer:"}"""
             
             response = await asyncio.to_thread(self.gemini_llm.invoke, prompt)
             cleaned_output = self._clean_markdown_output(response.content)
@@ -364,7 +428,17 @@ Do not use asterisks, markdown, or special formatting characters."""
             
         except Exception as e:
             print(f"Chat error: {e}")
-            return ("I apologize, but I couldn't process your question at the moment."), []
+            # Return error message in requested language
+            error_messages = {
+                "hi": "क्षमा करें, मैं इस समय आपके प्रश्न को संसाधित नहीं कर सका।",
+                "bn": "দুঃখিত, আমি এই মুহূর্তে আপনার প্রশ্ন প্রক্রিয়া করতে পারছি না।",
+                "te": "క్షమించండి, నేను ప్రస్తుతం మీ ప్రశ్నను ప్రాసెస్ చేయలేకపోతున్నాను.",
+                "mr": "माफ करा, मी सध्या तुमचा प्रश्न प्रक्रिया करू शकत नाही.",
+                "ta": "மன்னிக்கவும், உங்கள் கேள்வியை இப்போது செயலாக்க முடியவில்லை.",
+                "gu": "માફ કરશો, હું હાલમાં તમારા પ્રશ્નની પ્રક્રિયા કરી શકતો નથી.",
+                "en": "I apologize, but I couldn't process your question at the moment."
+            }
+            return error_messages.get(language, error_messages["en"]), []
     
     def get_legal_kb_info(self) -> Dict[str, Any]:
         """Get information about the legal knowledge base"""

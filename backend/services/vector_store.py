@@ -36,13 +36,13 @@ class VectorStoreManager:
         self.collection_name = os.getenv("CHROMA_COLLECTION_NAME", "legal_documents")
         self.document_collections: Dict[str, chromadb.Collection] = {}
         
-        # Auto-cleanup settings
-        self.max_documents = int(os.getenv("MAX_DOCUMENTS_STORED", "10"))  # Maximum documents to keep
-        self.document_ttl_hours = int(os.getenv("DOCUMENT_TTL_HOURS", "24"))  # Document time-to-live
+        # FREE TIER OPTIMIZED SETTINGS
+        self.max_documents = int(os.getenv("MAX_DOCUMENTS_STORED", "5"))  # Reduced from 10
+        self.document_ttl_hours = int(os.getenv("DOCUMENT_TTL_HOURS", "12"))  # Reduced from 24
         self.auto_cleanup_enabled = os.getenv("AUTO_CLEANUP_ENABLED", "true").lower() == "true"
         
         print(f"✅ ChromaDB initialized at: {self.chroma_db_path}")
-        print(f"📦 Max documents: {self.max_documents}, TTL: {self.document_ttl_hours} hours")
+        print(f"📦 Free Tier Mode: Max documents: {self.max_documents}, TTL: {self.document_ttl_hours} hours")
         
         # Perform initial cleanup on startup
         if self.auto_cleanup_enabled:
