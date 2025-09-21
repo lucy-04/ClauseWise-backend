@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env (from project root)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 load_dotenv()  # fallback to root if needed
-from fastapi import FastAPI, HTTPException, File, UploadFile, BackgroundTasks
+from fastapi import FastAPI, HTTPException, File, Request, UploadFile, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -43,12 +43,23 @@ app.add_middleware(
         "http://localhost:5173",  # Vite dev server
         "http://127.0.0.1:5173",   # Vite dev server
         "http://127.0.0.1:5174",
-        "http://localhost:5174"
+        "http://localhost:5174",
+        "https://clausewise-j83i8cskd-lakshay-tutejas-projects.vercel.app",
+        "clausewise-j83i8cskd-lakshay-tutejas-projects.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def verify_secret(request: Request, call_next):
+    secret = request.headers.get("x-backend-secret")
+    if request.url.path == "/health" or request.method == "OPTIONS":
+        return await call_next(request)
+    if secret != os.getenv("BACKEND_SECRET"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return await call_next(request)
 
 # Initialize services
 try:
