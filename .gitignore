@@ -57,6 +57,7 @@ streamlit.log
 backend/legal_datasets/*.cache
 backend/legal_datasets/processed/
 legal_kb_cache/
+backend/legal_datasets/supported_datasets.json
 
 # Model Downloads and Cache
 .cache/
