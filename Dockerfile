@@ -16,7 +16,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the backend code
-COPY . .
+COPY ClauseWise/backend/ .
+
 
 # Create necessary directories
 RUN mkdir -p chroma_db legal_datasets
@@ -25,4 +26,4 @@ RUN mkdir -p chroma_db legal_datasets
 EXPOSE 8080
 
 # Use the PORT environment variable from Cloud Run
-CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1
+CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-keep-alive 30
