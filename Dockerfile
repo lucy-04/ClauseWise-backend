@@ -22,8 +22,6 @@ COPY backend/ .
 # Create necessary directories
 RUN mkdir -p chroma_db
 
-# Expose the port Cloud Run will use
 EXPOSE 10000
 
-# Use the PORT environment variable from Cloud Run
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}
