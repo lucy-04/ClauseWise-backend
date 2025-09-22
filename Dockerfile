@@ -23,7 +23,7 @@ COPY backend/ .
 RUN mkdir -p chroma_db
 
 # Expose the port Cloud Run will use
-EXPOSE 8080
+EXPOSE 10000
 
 # Use the PORT environment variable from Cloud Run
-CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-keep-alive 30
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]

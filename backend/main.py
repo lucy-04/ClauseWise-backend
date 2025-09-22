@@ -16,10 +16,10 @@ import logging
 load_dotenv()
 
 # Import your services
-from backend.services.llm_service import EnhancedLLMService
-from backend.services.document_processor import DocumentProcessor  
-from backend.services.vector_store import VectorStoreManager
-from backend.services.voice_service import VoiceService
+from services.llm_service import EnhancedLLMService
+from services.document_processor import DocumentProcessor  
+from services.vector_store import VectorStoreManager
+from services.voice_service import VoiceService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -732,7 +732,7 @@ if __name__ == "__main__":
     import uvicorn
 
     # Get port from environment variable, default to 8080
-    port = int(os.getenv("PORT", 8080))
+    port = int(os.getenv("PORT", 1000))
     
     print(f"🚀 Starting ClauseWise API on port {port}")
     
