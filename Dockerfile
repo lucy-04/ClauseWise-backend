@@ -16,11 +16,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the backend code
-COPY ClauseWise/backend/ .
+COPY backend/ .
 
 
 # Create necessary directories
-RUN mkdir -p chroma_db legal_datasets
+RUN mkdir -p chroma_db
 
 # Expose the port Cloud Run will use
 EXPOSE 8080
